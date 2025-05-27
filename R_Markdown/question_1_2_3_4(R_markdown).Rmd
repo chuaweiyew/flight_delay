@@ -1,0 +1,275 @@
+---
+title: "Question 1,2,3,4"
+author: "Chua Wei Yew Student Number: 190526948"
+date: "3/31/2022"
+output:
+  html_document: default
+  pdf_document: default
+---
+Please download the files 2004.csv, 2005.csv, airports.csv, carriers.csv, and plane-data.csv from https://doi.org/10.7910/DVN/HG7NV7
+Ensure that you have set your working directory to the location where the files are downloaded.
+```{r}
+# ======== load libraries ========
+
+library(DBI)
+library(dplyr)
+```
+
+```{r setup, include=FALSE}
+# ======== create the database ========
+knitr::opts_knit$set(root.dir = "F:/School/Year_3/ST2195/Course_Work/Data/")
+
+#setwd('F:/School/Year_3/ST2195/Course_Work/Data/')
+if (file.exists("airline2_r.db")){
+  file.remove("airline2_r.db")
+}
+
+conn <- dbConnect(RSQLite::SQLite(), "airline2_r.db")
+```
+
+```{r}
+# Load in the data from the csv files
+airports <- read.csv("airports.csv", header = TRUE)
+carriers <- read.csv("carriers.csv", header = TRUE)
+planes <- read.csv("plane-data.csv", header = TRUE)
+dbWriteTable(conn, "airports", airports)
+dbWriteTable(conn, "carriers", carriers)
+dbWriteTable(conn, "planes", planes)
+
+for(i in c(2004:2005)) {
+  filename <- paste0(i, ".csv")
+  print(paste("Processing:", i))
+  ontime <- read.csv(filename, header = TRUE)
+  if(i == 2004) {
+    dbWriteTable(conn, "ontime", ontime)
+  } else {
+    dbWriteTable(conn, "ontime", ontime, append = TRUE)
+  }
+}
+```
+
+```{r}
+# Create Data Frame and Remove Cancelled Flights
+ontime_db = tbl(conn, "ontime")
+
+df_ontime_db = data.frame(ontime_db)
+df_ontime_db = select(df_ontime_db, -c('ActualElapsedTime','FlightNum', 'CRSElapsedTime', 'AirTime','Distance',
+                                       'TaxiIn', 'TaxiOut', 'Diverted','CancellationCode', 'CarrierDelay',
+                                       'WeatherDelay', 'NASDelay', 'SecurityDelay', 'LateAircraftDelay'))
+df_ontime_db = df_ontime_db[df_ontime_db$Cancelled != 1,] #removed flights that were cancelled, to lower number of entries and wont affect result
+```
+
+```{r}
+# Transform characters into numeric and view the class type
+chars <- sapply(df_ontime_db, is.character)
+df_ontime_db[ , chars] <- as.data.frame(apply(df_ontime_db[ , chars], 2, as.numeric)) #transform characters into numeric
+sapply(df_ontime_db, class )
+```
+
+```{r}
+# Create new data frames called flight_sum and flight_sum_delayed and add a new column called CRSDepHour
+flight_sum<- df_ontime_db %>%
+  #group flight cancellation and flight delay into one level
+  mutate(Delay = ifelse(DepDelay >= 15 | is.na(DepDelay) == TRUE, 1, 0),
+  ) %>%
+  #select relevant variables and save to a new data table
+  select(Delay, Year, Month, DayofMonth, DayOfWeek,Origin, CRSDepTime)
+flight_sum$CRSDepHour = flight_sum$CRSDepTime %/% 100
+
+flight_sum_delay <- df_ontime_db %>%
+  #group flight cancellation and flight delay into one level
+  mutate(Delay = ifelse(DepDelay >= 15 | is.na(DepDelay) == TRUE, 1, 0),
+  ) %>%
+  #select relevant variables and save to a new data table
+  select(Delay, Year, Month, DayofMonth, DayOfWeek,Origin, CRSDepTime)
+flight_sum_delay = flight_sum_delay[flight_sum_delay$Delay !=0,]
+flight_sum_delay$CRSDepHour = flight_sum_delay$CRSDepTime %/% 100
+```
+Question 1:
+```{r}
+# choose colours to use
+colors=c('Delayed'='blue', 'Flights'='red')
+```
+
+```{r}
+# Q1: Best Time of day to Minimise Delay
+library(ggplot2)
+flight_sum_day = flight_sum %>%group_by(CRSDepHour) %>% summarize(n_Delays = n())
+flight_sum_delay_day = flight_sum_delay %>%group_by(CRSDepHour) %>% summarize(n_Delays = n())
+ggplot() +
+  geom_col(data=flight_sum_day, aes(x= CRSDepHour, y = n_Delays, colour='Flights', fill='Flights', label=n_Delays))+
+  geom_text(nudge_y = 1)+
+  geom_col(data=flight_sum_delay_day, aes(x= CRSDepHour, y = n_Delays, colour='Delayed', fill='Delayed', label=n_Delays)) +
+  geom_text(nudge_y = 1)+
+  scale_x_discrete(limits = 0:23) +
+  ggtitle("Distribution of Flights & Delays by Time of Day") +
+  labs(x="Time (in 24Hr Format)", y='Count', color ="Legend", fill = "Legend")
+```
+
+```{r}
+# Q1: Best Day of Week to Minimise Delay
+flight_sum_week = flight_sum %>%group_by(DayOfWeek) %>% summarize(n_Delays = n())
+flight_sum_delay_week = flight_sum_delay %>% group_by(DayOfWeek) %>% summarize(n_Delays = n())
+ggplot() +
+  geom_col(data=flight_sum_week, aes(x= DayOfWeek, y = n_Delays, colour='Flights', fill='Flights', label=n_Delays))+
+  geom_text(nudge_y = 1)+
+  geom_col(data=flight_sum_delay_week, aes(x= DayOfWeek, y = n_Delays, colour='Delayed', fill='Delayed', label=n_Delays)) +
+  geom_text(nudge_y = 1)+
+  scale_x_discrete(limits = 1:7) +
+  ggtitle("Distribution of Flights & Delays by Day of Week") +
+  labs(x="Day of Week", y='Count', color ="Legend", fill = "Legend")
+```
+
+```{r}
+# Q1: Best Time of Year to Minimise Delay (sorted by month)
+flight_sum_month = flight_sum %>%group_by(Month) %>% summarize(n_Delays = n())
+flight_sum_delay_month = flight_sum_delay %>% group_by(Month) %>% summarize(n_Delays = n())
+ggplot() +
+  geom_col(data=flight_sum_month, aes(x= Month, y = n_Delays, colour='Flights', fill='Flights', label=n_Delays))+
+  geom_text(nudge_y = 1)+
+  geom_col(data=flight_sum_delay_month, aes(x= Month, y = n_Delays, colour='Delayed', fill='Delayed', label=n_Delays)) +
+  geom_text(nudge_y = 1)+
+  scale_x_discrete(limits = 1:12) +
+  ggtitle("Distribution of Flights & Delays by Month") +
+  labs(x="Month", y='Count', color ="Legend", fill = "Legend")
+```
+Question 2: Do Older Planes Suffer More Delays?
+
+Data in 'years' column ,the date the aircraft model is launched, and not 'issue_date' is used to calculate age as 'issue_date' is the date the airline receives the aircraft, as it is normal for aircraft to be bought and sold multiple times by carriers, it might not be the original delivery date, therefore the true age of the plane is unknown and may affect the results, also, many aircrafts are bought and delivered close to launch date, this means that launch date, the data in the 'year' column, will give more accurate results in terms of if older aircraft causes more delays.
+
+```{r}
+#Q2:
+flight_sum_old = data.frame(ontime_db)
+flight_sum_old = select(flight_sum_old, -c('ActualElapsedTime','FlightNum', 'CRSElapsedTime', 'AirTime','Distance',
+                                         'TaxiIn', 'TaxiOut', 'Diverted','CancellationCode', 'CarrierDelay',
+                                         'WeatherDelay', 'NASDelay', 'SecurityDelay', 'LateAircraftDelay'))
+flight_sum_old = flight_sum_old[flight_sum_old$Cancelled != 1,]
+
+flight_sum_old<- flight_sum_old %>%
+  #group flight cancellation and flight delay into one level
+  mutate(Delay = ifelse(DepDelay >= 15 |ArrDelay >= 15| is.na(DepDelay) == TRUE, 1, 0),)
+
+join_by = colnames(planes)[1]
+names(join_by)=colnames(flight_sum_old)[10]
+older_planes_delay = left_join(flight_sum_old,planes, by=join_by)
+#CHI SQUARE TESTING
+chisq.test(older_planes_delay$year, older_planes_delay$Delay, correct=FALSE)
+```
+Question 3: How does the number of people flying between different locations change over time?
+
+Forming the Data
+```{r}
+# Q3:
+q1_2004_db = dbGetQuery(conn, 'SELECT Origin, Dest FROM ontime
+                                WHERE (ontime.Year = "2004")
+                                AND (ontime.Origin ="ATL")
+                                AND ((ontime.Month = "1") OR (ontime.Month = "2") OR (ontime.Month = "3"))')
+q2_2004_db = dbGetQuery(conn, 'SELECT Origin, Dest FROM ontime
+                                WHERE (ontime.Year = "2004")
+                                AND (ontime.Origin ="ATL")
+                                AND ((ontime.Month = "4") OR (ontime.Month = "5") OR (ontime.Month = "6"))')
+q3_2004_db = dbGetQuery(conn, 'SELECT Origin, Dest FROM ontime
+                                WHERE (ontime.Year = "2004")
+                                AND (ontime.Origin ="ATL")
+                                AND ((ontime.Month = "7") OR (ontime.Month = "8") OR (ontime.Month = "9"))')
+q4_2004_db = dbGetQuery(conn, 'SELECT Origin, Dest FROM ontime
+                                WHERE (ontime.Year = "2004")
+                                AND (ontime.Origin ="ATL")
+                                AND ((ontime.Month = "10") OR (ontime.Month = "11") OR (ontime.Month = "12"))')
+q1_2005_db = dbGetQuery(conn, 'SELECT Origin, Dest FROM ontime
+                                WHERE (ontime.Year = "2005")
+                                AND (ontime.Origin ="ATL")
+                                AND ((ontime.Month = "1") OR (ontime.Month = "2") OR (ontime.Month = "3"))')
+q2_2005_db = dbGetQuery(conn, 'SELECT Origin, Dest FROM ontime
+                                WHERE (ontime.Year = "2005")
+                                AND (ontime.Origin ="ATL")
+                                AND ((ontime.Month = "4") OR (ontime.Month = "5") OR (ontime.Month = "6"))')
+q3_2005_db = dbGetQuery(conn, 'SELECT Origin, Dest FROM ontime
+                                WHERE (ontime.Year = "2005")
+                                AND (ontime.Origin ="ATL")
+                                AND ((ontime.Month = "7") OR (ontime.Month = "8") OR (ontime.Month = "9"))')
+q4_2005_db = dbGetQuery(conn, 'SELECT Origin, Dest FROM ontime
+                                WHERE (ontime.Year = "2005")
+                                AND (ontime.Origin ="ATL")
+                                AND ((ontime.Month = "10") OR (ontime.Month = "11") OR (ontime.Month = "12"))')
+```
+
+Plotting the Data
+```{r}
+par(mfrow=c(2,4))
+library(ggplot2)
+
+q1_2004_db = q1_2004_db %>% group_by(Dest) %>% summarize(n_count = n()) %>% arrange(desc(n_count))%>% slice(1:10)
+q12004=ggplot(q1_2004_db, aes(reorder(x=Dest, -n_count), y=n_count, colour = Dest, fill = Dest), stat="identity") +
+  geom_col() + geom_text(aes(label = n_count), colour='black')+
+  ggtitle("Top 10 Destinations from Atlanta in the First Quarter of 2004") +
+  ylab('Count') + xlab('Airport')
+
+q2_2004_db = q2_2004_db %>% group_by(Dest) %>% summarize(n_count = n()) %>% arrange(desc(n_count))%>% slice(1:10)
+q22004=ggplot(q2_2004_db, aes(reorder(x=Dest, -n_count), y=n_count, colour = Dest, fill = Dest), stat="identity") +
+  geom_col() + geom_text(aes(label = n_count), colour='black')+
+  ggtitle("Top 10 Destinations from Atlanta in the Second Quarter of 2004") +
+  ylab('Count') + xlab('Airport')
+
+q3_2004_db = q3_2004_db %>% group_by(Dest) %>% summarize(n_count = n()) %>% arrange(desc(n_count))%>% slice(1:10)
+q32004=ggplot(q3_2004_db, aes(reorder(x=Dest, -n_count), y=n_count, colour = Dest, fill = Dest), stat="identity") +
+  geom_col() + geom_text(aes(label = n_count), colour='black')+
+  ggtitle("Top 10 Destinations from Atlanta in the Third Quarter of 2004") +
+  ylab('Count') + xlab('Airport')
+
+q4_2004_db = q4_2004_db %>% group_by(Dest) %>% summarize(n_count = n()) %>% arrange(desc(n_count))%>% slice(1:10)
+q42004=ggplot(q4_2004_db, aes(reorder(x=Dest, -n_count), y=n_count, colour = Dest, fill = Dest), stat="identity") +
+  geom_col() + geom_text(aes(label = n_count), colour='black')+
+  ggtitle("Top 10 Destinations from Atlanta in the Fourth Quarter of 2004") +
+  ylab('Count') + xlab('Airport')
+
+q1_2005_db = q1_2005_db %>% group_by(Dest) %>% summarize(n_count = n()) %>% arrange(desc(n_count))%>% slice(1:10)
+q12005=ggplot(q1_2005_db, aes(reorder(x=Dest, -n_count), y=n_count, colour = Dest, fill = Dest), stat="identity") +
+  geom_col() + geom_text(aes(label = n_count), colour='black')+
+  ggtitle("Top 10 Destinations from Atlanta in the First Quarter of 2005") +
+  ylab('Count') + xlab('Airport')
+
+q2_2005_db = q2_2005_db %>% group_by(Dest) %>% summarize(n_count = n()) %>% arrange(desc(n_count))%>% slice(1:10)
+q22005=ggplot(q2_2005_db, aes(reorder(x=Dest, -n_count), y=n_count, colour = Dest, fill = Dest), stat="identity") +
+  geom_col() + geom_text(aes(label = n_count), colour='black')+
+  ggtitle("Top 10 Destinations from Atlanta in the Second Quarter of 2005") +
+  ylab('Count') + xlab('Airport')
+
+q3_2005_db = q3_2005_db %>% group_by(Dest) %>% summarize(n_count = n()) %>% arrange(desc(n_count))%>% slice(1:10)
+q32005=ggplot(q3_2005_db, aes(reorder(x=Dest, -n_count), y=n_count, colour = Dest, fill = Dest), stat="identity") +
+  geom_col() + geom_text(aes(label = n_count), colour='black')+
+  ggtitle("Top 10 Destinations from Atlanta in the Third Quarter of 2005") +
+  ylab('Count') + xlab('Airport')
+
+q4_2005_db = q4_2005_db %>% group_by(Dest) %>% summarize(n_count = n()) %>% arrange(desc(n_count))%>% slice(1:10)
+q42005=ggplot(q4_2005_db, aes(reorder(x=Dest, -n_count), y=n_count, colour = Dest, fill = Dest), stat="identity") +
+  geom_col() + geom_text(aes(label = n_count), colour='black')+
+  ggtitle("Top 10 Destinations from Atlanta in the Fourth Quarter of 2005") +
+  ylab('Count') + xlab('Airport')
+library(gridExtra)
+grid.arrange(q12004, q22004, q32004, q42004, q12005, q22005, q32005, q42005, ncol=4)
+```
+
+Question 4: Can you detect cascading failures as delays in one airport create delays in others?
+```{r}
+int <- sapply(df_ontime_db, is.integer)
+df_ontime_db[ , int] <- as.data.frame(apply(df_ontime_db[ , int], 2, as.numeric)) #transform characters into numeric
+sapply(df_ontime_db, class)
+df_ontime_db$DepTime <- as.numeric(as.character(df_ontime_db$DepTime))
+df_ontime_db$ArrTime <- as.numeric(as.character(df_ontime_db$ArrTime))
+df_ontime_db$ArrDelay <- as.numeric(as.character(df_ontime_db$ArrDelay))
+df_ontime_db$DepDelay <- as.numeric(as.character(df_ontime_db$DepDelay))
+na.omit(df_ontime_db)
+
+flight_sum_2004<- df_ontime_db %>%
+  mutate(Dep_Delay_True = ifelse(DepDelay >= 15 | is.na(DepDelay) == TRUE, 1, 0),)%>%
+  mutate(Arr_Delay_True = ifelse(ArrDelay >= 15 | is.na(ArrDelay) == TRUE, 1, 0),)
+
+
+#flight_sum$CRSDepHour = flight_sum$CRSDepTime %/% 100
+flight_sum_2004 = flight_sum_2004[flight_sum_2004$Year != 2005,]
+flight_sum_UA = flight_sum_2004[flight_sum_2004$UniqueCarrier == 'UA',]
+
+flight_sum_UA=flight_sum_UA %>% group_by(Month,DayofMonth,UniqueCarrier,TailNum,DepDelay,ArrDelay,Origin,Dest,Dep_Delay_True)%>% arrange(Month,DayofMonth,TailNum,DepTime)
+flight_sum_UA=flight_sum_UA[flight_sum_UA$Dep_Delay_True==1&flight_sum_UA$Arr_Delay_True==1,]
+```

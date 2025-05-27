@@ -1,0 +1,118 @@
+---
+title: "question_5"
+author: 'Chua Wei Yew Student Number: 190526948'
+date: "3/31/2022"
+output: html_document
+---
+
+Please download the files 2004.csv, 2005.csv, airports.csv, carriers.csv, and plane-data.csv from https://doi.org/10.7910/DVN/HG7NV7
+Ensure that you have set your working directory to the location where the files are downloaded.
+
+#Load libraries
+```{r}
+library(DBI)
+library(dplyr)
+```
+
+#Create the Database
+```{r}
+setwd('F:/School/Year_3/ST2195/Course_Work/Data')
+if (file.exists("airline2_r.db")){
+  file.remove("airline2_r.db")
+}
+
+conn <- dbConnect(RSQLite::SQLite(), "airline2_r.db")
+```
+
+# ======== write to the database ========
+
+# Load in the data from the csv files
+
+```{r}
+airports <- read.csv("airports.csv", header = TRUE)
+carriers <- read.csv("carriers.csv", header = TRUE)
+planes <- read.csv("plane-data.csv", header = TRUE)
+dbWriteTable(conn, "airports", airports)
+dbWriteTable(conn, "carriers", carriers)
+dbWriteTable(conn, "planes", planes)
+
+for(i in c(2004:2005)) {
+  filename <- paste0(i, ".csv")
+  print(paste("Processing:", i))
+  ontime <- read.csv(filename, header = TRUE)
+  if(i == 2004) {
+    dbWriteTable(conn, "ontime", ontime)
+  } else {
+    dbWriteTable(conn, "ontime", ontime, append = TRUE)
+  }
+}
+```
+
+```{r}
+ontime_db = tbl(conn, "ontime")
+q5_df_ontime_db = data.frame(ontime_db)
+q5_df_ontime_db = q5_df_ontime_db[q5_df_ontime_db$Cancelled != 1,] #removed flights that were cancelled, to lower number
+#of entries and wont affect result
+q5_df_ontime_db = q5_df_ontime_db[q5_df_ontime_db$Year != 2005,]
+q5_df_ontime_db = q5_df_ontime_db[q5_df_ontime_db$Month == 1,]
+```
+
+```{r}
+flight_sum_small = q5_df_ontime_db %>% group_by(Origin) %>% summarise(n_origin=n()) %>% arrange(desc(n_origin)) %>% head(10)
+```
+
+```{r}
+flight_sum<- q5_df_ontime_db %>%
+  #group flight cancellation and flight delay into one level
+  mutate(Delay = ifelse(DepDelay >= 15 | is.na(DepDelay) == TRUE, 1, 0),
+  ) %>%
+  #select relevant variables and save to a new data table
+  select(Delay, Year, Month, DayofMonth, DayOfWeek,Origin, CRSDepTime,
+         CarrierDelay, WeatherDelay, NASDelay, SecurityDelay,LateAircraftDelay)
+```
+
+```{r}
+flight_sum_small = q5_df_ontime_db %>% group_by(Origin) %>% summarise(n_origin=n()) %>% arrange(desc(n_origin)) %>% head(10)
+```
+We only select the top 10 Origins by using flight_sum_small.
+
+```{r}
+flight_sum = flight_sum[flight_sum$Origin %in% c('ORD','ATL','DFW','LAX','CVG','IAH','PHX','LAS','DEN','EWR'),]
+flight_sum <- na.omit(flight_sum)
+
+round(cor(flight_sum[,which(sapply(flight_sum,is.numeric))]), 3)
+```
+# SPLIT TRAINING AND TEST SETS DEP
+```{r}
+set.seed(100)
+n <- nrow(flight_sum)
+train_idx <- sample(1:n, ceiling(0.7*n))
+length(train_idx)
+```
+```{r}
+train <- flight_sum[train_idx, ]
+test <- flight_sum[-train_idx, ]
+dim(train)
+```
+# Use all predictors in the model
+```{r}
+mod.full <- glm(Delay ~ ., data = train, family = binomial)
+summary(mod.full)
+pchisq(mod.full$deviance,mod.full$df.residual,lower=FALSE)
+```
+# Random Forest
+```{r}
+library(randomForest)
+mod.rf <- randomForest(Delay ~ ., data = train, ntree=100, prob=TRUE)
+plot(mod.rf)
+importance(mod.rf)
+pred.rf <- predict(mod.rf, newdata = test, type = )
+head(pred.rf)
+```
+```{r}
+library(pROC)
+roc_rf <- roc(test$Delay, pred.rf)
+plot(roc_rf)
+#Area under the ROC curve
+roc_rf$auc
+```
