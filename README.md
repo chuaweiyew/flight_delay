@@ -41,13 +41,6 @@ The data used in this project was sourced from the [Harvard Dataverse](https://d
 
 ## 🗂️ Files Included
 
-- `data/` - folder containing all data files used
-  - `airline2_r.db` - database created
-  - `2004.csv` - flight data for 2004
-  - `2005.csv` - flight data for 2005
-  - `airports.csv` - airport data
-  - `carriers.csv` - carrier data
-  - `plane-data.csv` -plane data
 - `notebooks/` - folder containing python notebook files
   - `question_1_2_3_4(notebook).ipynb` - python notebook for questions 1,2,3,4
   - `question_5(notebook).ipynb` - python notebook for questions 5
